@@ -13,29 +13,59 @@ Julia bindings for [Apache Arrow DataFusion](https://datafusion.apache.org/), a 
 ## Prerequisites
 
 1. **Julia 1.8+**: This package requires Julia 1.8 or later
-2. **DataFusion C API**: The companion Rust library must be built first
+2. **Rust 1.70+**: Required to build the C API
+3. **Git**: For cloning the repositories
 
 ## Installation
 
-### Step 1: Build the DataFusion C API
+DataFusion.jl requires the companion [datafusion-c-api](https://github.com/vustef/datafusion-c-api) C library. Follow these steps to set up both components:
 
-First, build the Rust C API library:
+### Step 1: Clone the Repositories
 
 ```bash
-cd ../datafusion-c-api
+# Clone both repositories
+git clone https://github.com/vustef/datafusion-c-api.git
+git clone https://github.com/vustef/DataFusion.jl.git
+```
+
+### Step 2: Build the C API
+
+```bash
+cd datafusion-c-api
 cargo build --release
 ```
 
-This will create the necessary dynamic library that DataFusion.jl depends on.
+This will create the necessary dynamic library (`libdatafusion_c_api.dylib` on macOS, `libdatafusion_c_api.so` on Linux, or `datafusion_c_api.dll` on Windows) in `target/release/`.
 
-### Step 2: Install DataFusion.jl
+### Step 3: Set Up Julia Package
 
-```julia
-# Clone this repository or use it as a local package
-julia> import Pkg
-julia> Pkg.activate("path/to/DataFusion.jl")
-julia> Pkg.instantiate()
+```bash
+cd ../DataFusion.jl
+julia --project=. -e "using Pkg; Pkg.instantiate()"
 ```
+
+### Step 4: Verify Installation
+
+```bash
+julia --project=. examples/basic_usage.jl
+```
+
+## Directory Structure
+
+Your setup should look like this:
+```
+your-workspace/
+├── datafusion-c-api/          # C API repository
+│   ├── src/
+│   ├── target/release/        # Built library location
+│   └── ...
+└── DataFusion.jl/             # Julia package repository
+    ├── src/
+    ├── examples/
+    └── ...
+```
+
+The Julia package automatically looks for the C library in the relative path `../datafusion-c-api/target/release/`.
 
 ## Quick Start
 
@@ -210,7 +240,16 @@ The package includes several example scripts:
 ```bash
 # Run the basic usage example
 cd DataFusion.jl
-julia examples/basic_usage.jl
+julia --project=. examples/basic_usage.jl
+```
+
+## Testing
+
+Run the test suite to verify everything is working:
+
+```bash
+cd DataFusion.jl
+julia --project=. test/runtests.jl
 ```
 
 ## Error Handling
@@ -234,34 +273,19 @@ end
 3. **Predicate Pushdown**: Use WHERE clauses to filter data early in the query
 4. **Column Selection**: Only select the columns you need to reduce memory usage
 
-## Building from Source
-
-### Prerequisites
-- Rust (1.70 or later)
-- Julia (1.8 or later)
-- A C compiler (for linking)
-
-### Build Steps
-
-1. **Build the C API:**
-   ```bash
-   cd ../datafusion-c-api
-   cargo build --release
-   ```
-
-2. **Test the Julia bindings:**
-   ```bash
-   cd DataFusion.jl
-   julia examples/basic_usage.jl
-   ```
-
 ## Troubleshooting
 
 ### "Could not find DataFusion C library"
 This error occurs when the Julia package cannot locate the compiled Rust library. Ensure that:
 1. You've built the `datafusion-c-api` project with `cargo build --release`
-2. The library file exists in the expected location
-3. The relative path from the Julia project to the Rust library is correct
+2. The library file exists in `../datafusion-c-api/target/release/`
+3. Both repositories are in the same parent directory
+
+### Build Issues
+If you encounter build errors:
+1. Ensure you have Rust 1.70+ installed: `rustc --version`
+2. Update your Rust installation: `rustup update`
+3. Clean and rebuild: `cargo clean && cargo build --release`
 
 ### Memory Issues
 If you encounter memory-related errors:
@@ -275,19 +299,37 @@ If queries are running slowly:
 2. Check that your CSV files are properly formatted
 3. Consider using more specific queries with appropriate filtering
 
+## Architecture
+
+DataFusion.jl consists of two main components:
+
+1. **[datafusion-c-api](https://github.com/vustef/datafusion-c-api)**: A Rust crate that provides C-compatible bindings to Apache Arrow DataFusion
+2. **DataFusion.jl**: This Julia package that provides high-level Julia bindings to the C API
+
+The architecture provides:
+- **Safety**: Memory management handled by both Rust and Julia garbage collectors
+- **Performance**: Direct calls to DataFusion's optimized Rust implementation
+- **Compatibility**: Standard C ABI ensures broad compatibility across platforms
+
+## Related Projects
+
+- **[Apache Arrow DataFusion](https://datafusion.apache.org/)** - The underlying query engine
+- **[datafusion-c-api](https://github.com/vustef/datafusion-c-api)** - C bindings for DataFusion (required dependency)
+- **[Arrow.jl](https://github.com/apache/arrow-julia)** - Julia bindings for Apache Arrow
+- **[DataFrames.jl](https://github.com/JuliaData/DataFrames.jl)** - DataFrames implementation in Julia
+
 ## Contributing
 
 Contributions are welcome! Please ensure that:
 1. The Rust C API builds successfully
 2. All Julia examples run without errors
 3. New features include appropriate documentation and examples
+4. Tests pass: `julia --project=. test/runtests.jl`
+
+When contributing, you may need to make changes to both repositories:
+- **C API changes**: Submit PRs to [datafusion-c-api](https://github.com/vustef/datafusion-c-api)
+- **Julia binding changes**: Submit PRs to this repository
 
 ## License
 
-This project is licensed under the same terms as Apache Arrow DataFusion.
-
-## Related Projects
-
-- [Apache Arrow DataFusion](https://datafusion.apache.org/) - The underlying query engine
-- [Arrow.jl](https://github.com/apache/arrow-julia) - Julia bindings for Apache Arrow
-- [DataFrames.jl](https://github.com/JuliaData/DataFrames.jl) - DataFrames implementation in Julia 
+This project is licensed under the same terms as Apache Arrow DataFusion - Apache License 2.0. 
