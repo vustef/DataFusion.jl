@@ -6,6 +6,7 @@ Julia bindings for [Apache Arrow DataFusion](https://datafusion.apache.org/), a 
 
 - **High Performance**: Leverages the speed and efficiency of DataFusion's Rust implementation
 - **SQL Support**: Full SQL query capabilities with DataFusion's comprehensive dialect
+- **Iceberg Support**: Full Apache Iceberg table format support with partitioning and schema evolution (powered by [iceberg-rust](https://github.com/JanKaul/iceberg-rust))
 - **Memory Safe**: Automatic resource management with Julia's garbage collector
 - **Easy Integration**: Simple API for registering data sources and executing queries
 - **Cross Platform**: Works on macOS, Linux, and Windows
@@ -90,6 +91,38 @@ println("Rows in first batch: ", batch_num_rows(result, 0))
 println("Columns in first batch: ", batch_num_columns(result, 0))
 ```
 
+### Iceberg Tables
+
+DataFusion.jl supports Apache Iceberg tables with full schema and partitioning capabilities:
+
+```julia
+using DataFusion
+
+# Create an Iceberg catalog
+catalog = iceberg_catalog_sql("sqlite://", "my_catalog")
+
+# Build a schema
+schema = iceberg_schema()
+add_long_field!(schema, UInt32(1), "id", true)
+add_long_field!(schema, UInt32(2), "customer_id", true)
+add_date_field!(schema, UInt32(3), "order_date", true)
+add_int_field!(schema, UInt32(4), "amount", true)
+
+# Create partition specification
+partition_spec = iceberg_partition_spec()
+add_day_field!(partition_spec, UInt32(3), UInt32(1000), "day")
+
+# Create and register Iceberg table
+table = iceberg_table("orders", "/path/to/orders", schema, partition_spec, catalog, "my_catalog")
+ctx = DataFusionContext()
+register_iceberg_table!(ctx, "orders", table)
+
+# Use the table with SQL
+result = sql(ctx, "INSERT INTO orders VALUES (1, 100, '2024-01-01', 250)")
+result = sql(ctx, "SELECT * FROM orders WHERE order_date >= '2024-01-01'")
+print_result(result)
+```
+
 ## API Reference
 
 ### Types
@@ -118,6 +151,51 @@ Register a CSV file as a table in the DataFusion context.
 ```julia
 register_csv!(ctx, "sales_data", "/path/to/sales.csv")
 ```
+
+#### Iceberg Functions
+
+##### `iceberg_catalog_sql(database_url::String, name::String) -> IcebergCatalog`
+Create a new SQL-based Iceberg catalog.
+
+**Arguments:**
+- `database_url`: Database connection URL (e.g., "sqlite://")
+- `name`: Catalog name
+
+**Example:**
+```julia
+catalog = iceberg_catalog_sql("sqlite://", "my_catalog")
+```
+
+##### `iceberg_schema() -> IcebergSchema`
+Create a new Iceberg schema builder.
+
+**Example:**
+```julia
+schema = iceberg_schema()
+add_long_field!(schema, UInt32(1), "id", true)
+add_date_field!(schema, UInt32(2), "created_at", true)
+```
+
+##### `add_long_field!(schema::IcebergSchema, id::UInt32, name::String, required::Bool)`
+Add a long (64-bit integer) field to the schema.
+
+##### `add_int_field!(schema::IcebergSchema, id::UInt32, name::String, required::Bool)`
+Add an int (32-bit integer) field to the schema.
+
+##### `add_date_field!(schema::IcebergSchema, id::UInt32, name::String, required::Bool)`
+Add a date field to the schema.
+
+##### `iceberg_partition_spec() -> IcebergPartitionSpec`
+Create a new Iceberg partition specification.
+
+##### `add_day_field!(spec::IcebergPartitionSpec, source_id::UInt32, field_id::UInt32, name::String)`
+Add day-based partitioning to the partition specification.
+
+##### `iceberg_table(name::String, location::String, schema::IcebergSchema, partition_spec::IcebergPartitionSpec, catalog::IcebergCatalog, catalog_name::String) -> IcebergTable`
+Create a new Iceberg table.
+
+##### `register_iceberg_table!(ctx::DataFusionContext, table_name::String, table::IcebergTable)`
+Register an Iceberg table with the DataFusion context.
 
 #### `sql(ctx::DataFusionContext, query::String) -> DataFusionResult`
 Execute a SQL query and return the results.
@@ -178,57 +256,44 @@ result = sql(ctx, "SELECT name, salary FROM employees ORDER BY salary DESC LIMIT
 print_result(result)
 ```
 
-### Working with Multiple Tables
+### Working with Iceberg Tables
 
 ```julia
 using DataFusion
 
+# Create an Iceberg catalog and schema
+catalog = iceberg_catalog_sql("sqlite://", "analytics")
+schema = iceberg_schema()
+add_long_field!(schema, UInt32(1), "id", true)
+add_long_field!(schema, UInt32(2), "customer_id", true)
+add_long_field!(schema, UInt32(3), "product_id", true)
+add_date_field!(schema, UInt32(4), "order_date", true)
+add_int_field!(schema, UInt32(5), "amount", true)
+
+# Create day-partitioned table
+partition_spec = iceberg_partition_spec()
+add_day_field!(partition_spec, UInt32(4), UInt32(1000), "day")
+
+table = iceberg_table("orders", "/data/orders", schema, partition_spec, catalog, "analytics")
+
+# Register with DataFusion
 ctx = DataFusionContext()
+register_iceberg_table!(ctx, "orders", table)
 
-# Register multiple CSV files
-register_csv!(ctx, "employees", "employees.csv")
-register_csv!(ctx, "departments", "departments.csv")
-
-# Join tables
-result = sql(ctx, """
-    SELECT e.name, e.salary, d.department_name 
-    FROM employees e 
-    JOIN departments d ON e.department_id = d.id
-    ORDER BY e.salary DESC
+# Insert data
+sql(ctx, """
+    INSERT INTO orders (id, customer_id, product_id, order_date, amount) VALUES
+    (1, 101, 1, '2024-01-01', 250),
+    (2, 102, 2, '2024-01-01', 150),
+    (3, 103, 1, '2024-01-02', 300)
 """)
-print_result(result)
-```
 
-### Advanced Analytics
-
-```julia
-using DataFusion
-
-ctx = DataFusionContext()
-register_csv!(ctx, "sales", "sales_data.csv")
-
-# Window functions
+# Query with time-based filtering (takes advantage of partitioning)
 result = sql(ctx, """
-    SELECT 
-        product,
-        sale_date,
-        amount,
-        SUM(amount) OVER (PARTITION BY product ORDER BY sale_date) as running_total
-    FROM sales
-    ORDER BY product, sale_date
-""")
-print_result(result)
-
-# Complex aggregations
-result = sql(ctx, """
-    SELECT 
-        EXTRACT(YEAR FROM sale_date) as year,
-        EXTRACT(MONTH FROM sale_date) as month,
-        SUM(amount) as monthly_sales,
-        COUNT(*) as num_transactions
-    FROM sales
-    GROUP BY EXTRACT(YEAR FROM sale_date), EXTRACT(MONTH FROM sale_date)
-    ORDER BY year, month
+    SELECT product_id, SUM(amount) as total_sales
+    FROM orders 
+    WHERE order_date >= '2024-01-01' AND order_date < '2024-01-02'
+    GROUP BY product_id
 """)
 print_result(result)
 ```
@@ -241,6 +306,9 @@ The package includes several example scripts:
 # Run the basic usage example
 cd DataFusion.jl
 julia --project=. examples/basic_usage.jl
+
+# Run the Iceberg example
+julia --project=. examples/iceberg_usage.jl
 ```
 
 ## Testing
@@ -314,6 +382,7 @@ The architecture provides:
 ## Related Projects
 
 - **[Apache Arrow DataFusion](https://datafusion.apache.org/)** - The underlying query engine
+- **[iceberg-rust](https://github.com/JanKaul/iceberg-rust)** - Rust implementation of Apache Iceberg with DataFusion integration (used for Iceberg support)
 - **[datafusion-c-api](https://github.com/vustef/datafusion-c-api)** - C bindings for DataFusion (required dependency)
 - **[Arrow.jl](https://github.com/apache/arrow-julia)** - Julia bindings for Apache Arrow
 - **[DataFrames.jl](https://github.com/JuliaData/DataFrames.jl)** - DataFrames implementation in Julia
